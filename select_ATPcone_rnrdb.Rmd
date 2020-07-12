@@ -1,0 +1,131 @@
+---
+title: "Stand alone ATP cones in RNRdb"
+author: "Daniel Lundin, Ghada Nouairia"
+date: "July 9, 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Packages}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(feather))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(stringr))
+library(ggplot2)
+library(tidyverse)
+```
+
+```{r Load tables}
+DBS = c('refseq', 'genbank')
+MIN_HMM_COVERAGE = 0.9
+
+accessions <- read_feather("pfitmap.accessions.feather")
+# dbsources <- read_feather('pfitmap.dbsources.feather')
+domains <- read_feather('pfitmap.domains.feather')
+hmm_profiles <- read_feather('pfitmap.hmm_profiles.feather')
+proteins <- read_feather('pfitmap.proteins.feather')
+sequences <- read_feather('pfitmap.sequences.feather')
+taxa <- read_feather('pfitmap.taxa.feather')
+# tblout <- read_feather('pfitmap.tblout.feather')
+domtblout <- read_feather('pfitmap.domtblout.feather')
+```
+
+```{r Open All_domains}
+All_domains <- hmm_profiles %>%
+  inner_join(domains, by = 'profile') %>%
+  inner_join(accessions %>% 
+               filter(db %in% DBS) %>% 
+               select(accno, accto, taxon), 
+             by = 'accno') 
+```
+
+```{r ATP stand alone ATP-cones}
+ATP_sa = All_domains %>% 
+  filter(profile == 'ATP-cone') %>%
+  # anti_join(All_domains %>% filter(psuperfamily %in% c('Ferritin-like', 'NrdR-superamily', 'NrdGRE')), by = 'accno') %>%
+  inner_join(domtblout %>% select(accno, tlen), by = 'accno') %>%
+  filter(tlen < 120)
+```
+
+```{r list of genomes with sa_ATPcones}
+
+###choose the domain of life you are looking at
+Domain = 'Bacteria'
+
+###write a table with all genomes containing at least one stand alone ATP cone
+ATP_sa %>% 
+  distinct(accno, taxon) %>%
+  inner_join(taxa, by = 'taxon') %>%
+  filter(tdomain == Domain) %>%
+  select(accno, tphylum, tclass, taxon) %>%
+  group_by(tphylum) %>% 
+  mutate(count_by_phylum = sum(!is.na(tphylum))) %>% 
+  mutate(count_by_phylum = replace(count_by_phylum, count_by_phylum == '0', '-')) %>%
+  ungroup %>% group_by(tclass) %>%
+  mutate(count_by_class = sum(!is.na(tclass))) %>%
+  mutate(count_by_class = replace(count_by_class, count_by_class == '0', '-')) %>%
+  write_tsv(sprintf("./ATP-cone_sa_in_%s.tsv", Domain))
+ 
+ ###Plots 
+ ATP_sa %>% 
+  distinct(accno, taxon) %>% 
+  inner_join(taxa, by = 'taxon') %>%
+  filter(tdomain == Domain) %>%
+  select(accno, tphylum, tclass, taxon) %>%
+  # filter(tphylum %in% c('Euryarchaeota', 'Crenarchaeota', 'Thaumarchaeota')) %>%
+  group_by(tphylum) %>% 
+  mutate(count_by_phylum = n()) %>% 
+  ungroup %>% group_by(tclass) %>%
+  mutate(count_by_class = n()) %>%
+  filter(count_by_class > 0) %>%
+  # filter(count_by_ > 0) %>%
+  ggplot(aes(x=tclass, y=count_by_class)) +
+  geom_bar(stat="identity")+
+  ylab('Number of sequences') +
+  xlab(sprintf('Stand alone ATP-cones in %s Classes', Domain))
+   
+  # ggplot(aes(x=tphylum, y=count_by_phylum)) +
+  # geom_bar(stat="identity")+ 
+  # ylab('Number of sequences') +
+  # xlab(sprintf('Stand alone ATP-cones in some %s Phyla', Domain)) 
+```
+ 
+```{r list of Bacteria genomes with sa_ATPcones + NrdR + No NrdD} 
+  ATP_sa %>% 
+  distinct(accno, taxon) %>% 
+  inner_join(taxa, by = 'taxon') %>%
+  filter(tdomain == 'Bacteria') %>%
+  
+  ## to keep accnos from ATP_sa and NrdR
+  # transmute(ATP_sa_accno = accno, taxon) %>%
+  # inner_join(All_domains %>%
+  #   filter(profile == 'NrdR') %>%
+  #     transmute(NrdR_accno = accno, taxon),
+  # by = 'taxon')
+  
+  ###Only list of species
+  distinct(taxon) %>%
+  semi_join(All_domains %>% 
+               filter(profile == 'NrdR'),
+             by = 'taxon') %>% 
+  
+  ###Exclude genomes containing class III RNR 
+  anti_join(All_domains %>% 
+              filter(pclass == 'NrdD'), 
+            by = 'taxon') %>% 
+  write_tsv("./ATP-cone_sa_NrdR_noNrdD_Bacteria.tsv")
+```
+  
+```{r NrdR in Eukaryotes} 
+  NrdR_Euk = proteins %>% 
+  inner_join(hmm_profiles, by = 'profile') %>%
+  inner_join(accessions, by ='accno') %>%
+  inner_join(taxa, by = 'taxon') %>%
+  filter(tdomain == 'Eukaryota' & profile == 'NrdR')
+```
+  
